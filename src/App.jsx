@@ -339,12 +339,29 @@ jobs:
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────────
 export default function CopperDashboard() {
-  const [threshold] = useState({ warn: 2.5, critical: 5.0 });
-  const [tab, setTab] = useState("dashboard");
+  const STORAGE_KEY = "copper_admin_config";
+  const loadConfig  = () => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+  };
+  const savedConfig = loadConfig();
+
+  // Core UI state — declared first
+  const [tab, setTab]                   = useState("dashboard");
   const [notifEnabled, setNotifEnabled] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState(new Date().toLocaleTimeString());
-  const [flashKpi, setFlashKpi] = useState(false);
-  const audioRef = useRef(null);
+  const [lastRefresh, setLastRefresh]   = useState(new Date().toLocaleTimeString());
+  const [flashKpi, setFlashKpi]         = useState(false);
+  const audioRef                        = useRef(null);
+
+  // Admin state
+  const [threshold, setThreshold]       = useState({ warn: savedConfig.warn ?? 2.5, critical: savedConfig.critical ?? 5.0 });
+  const [priceLevels, setPriceLevels]   = useState(savedConfig.priceLevels ?? [5.00, 5.50, 6.00, 6.50, 7.00]);
+  const [smsNumber, setSmsNumber]       = useState(savedConfig.smsNumber ?? "");
+  const [adminLocked, setAdminLocked]   = useState(true);
+  const [pinInput, setPinInput]         = useState("");
+  const [pinError, setPinError]         = useState(false);
+  const [adminSaved, setAdminSaved]     = useState(false);
+  const [newLevel, setNewLevel]         = useState("");
+  const ADMIN_PIN                       = savedConfig.pin ?? "1234";
 
   const latest = HISTORY[HISTORY.length - 1];
   const prev   = HISTORY[HISTORY.length - 2];
@@ -416,6 +433,7 @@ export default function CopperDashboard() {
     { id: "alerts",    label: "🔔 Alert Log" },
     { id: "python",    label: "🐍 Python Script" },
     { id: "github",    label: "⚙️ GitHub Actions" },
+    { id: "admin",     label: "🔧 Admin" },
   ];
 
   const tabStyle = (id) => ({
@@ -424,6 +442,19 @@ export default function CopperDashboard() {
     color: tab === id ? "#fff" : C.muted,
     border: "none", transition: "all 0.2s",
   });
+
+  const handleTabChange = (id) => {
+    setTab(id);
+    // Reset admin state when leaving admin tab
+    if (id !== "admin") {
+      setPinInput("");
+      setPinError(false);
+    }
+    // Re-lock admin when switching away
+    if (id !== "admin" && !adminLocked) {
+      setAdminLocked(true);
+    }
+  };
 
   return (
     <div style={{ background: C.bg, minHeight: "100vh", fontFamily: "'JetBrains Mono', 'Fira Code', monospace", color: C.text, padding: "24px 20px" }}>
@@ -453,7 +484,7 @@ export default function CopperDashboard() {
 
         {/* TABS */}
         <div style={{ display: "flex", gap: 4, marginBottom: 22, background: C.panel, padding: 4, borderRadius: 8, width: "fit-content" }}>
-          {tabs.map((t) => <button key={t.id} style={tabStyle(t.id)} onClick={() => setTab(t.id)}>{t.label}</button>)}
+          {tabs.map((t) => <button key={t.id} style={tabStyle(t.id)} onClick={() => handleTabChange(t.id)}>{t.label}</button>)}
         </div>
 
         {/* ── DASHBOARD TAB ── */}
@@ -618,7 +649,237 @@ export default function CopperDashboard() {
           </div>
         )}
 
-        {/* FOOTER */}
+        {/* ── ADMIN TAB ── */}
+        {tab === "admin" && (
+          <div>
+            {/* PIN LOCK SCREEN */}
+            {adminLocked ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 20px" }}>
+                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 16, padding: "40px", maxWidth: 360, width: "100%", textAlign: "center" }}>
+                  <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+                  <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 6 }}>Admin Access</div>
+                  <div style={{ color: C.muted, fontSize: 13, marginBottom: 24 }}>Enter your PIN to access settings</div>
+                  <input
+                    type="password"
+                    maxLength={6}
+                    autoFocus={false}
+                    autoComplete="off"
+                    placeholder="Enter PIN"
+                    value={pinInput}
+                    onChange={e => { setPinInput(e.target.value); setPinError(false); }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        if (pinInput === ADMIN_PIN) { setAdminLocked(false); setPinInput(""); }
+                        else { setPinError(true); setPinInput(""); }
+                      }
+                    }}
+                    style={{
+                      width: "100%", padding: "12px", borderRadius: 8, fontSize: 20,
+                      textAlign: "center", letterSpacing: "0.3em",
+                      background: C.bg, border: `1px solid ${pinError ? C.red : C.border}`,
+                      color: C.text, outline: "none", boxSizing: "border-box", marginBottom: 8,
+                    }}
+                  />
+                  {pinError && <div style={{ color: C.red, fontSize: 12, marginBottom: 12 }}>❌ Incorrect PIN. Please try again.</div>}
+                  <button onClick={() => {
+                    if (pinInput === ADMIN_PIN) { setAdminLocked(false); setPinInput(""); }
+                    else { setPinError(true); setPinInput(""); }
+                  }} style={{
+                    width: "100%", padding: "12px", borderRadius: 8, cursor: "pointer",
+                    background: C.accent, color: "#fff", border: "none", fontWeight: 700, fontSize: 14,
+                  }}>Unlock Admin</button>
+                  <div style={{ color: C.muted, fontSize: 11, marginTop: 12 }}>Contact admin if you have forgotten your PIN</div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                {/* ADMIN HEADER */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>🔧 Admin Settings</div>
+                    <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>Changes save locally and update the Python script config</div>
+                  </div>
+                  <button onClick={() => setAdminLocked(true)} style={{
+                    padding: "7px 14px", borderRadius: 6, cursor: "pointer", fontSize: 12,
+                    background: C.panel, color: C.muted, border: `1px solid ${C.border}`,
+                  }}>🔒 Lock</button>
+                </div>
+
+                {/* ── SECTION 1: OI THRESHOLDS ── */}
+                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 16, color: C.text }}>📊 OI Change Thresholds</div>
+
+                  {/* Warning Slider */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ color: C.yellow, fontSize: 13, fontWeight: 700 }}>⚠️ Warning Threshold</span>
+                      <span style={{ color: C.yellow, fontSize: 18, fontWeight: 900, fontFamily: "monospace" }}>{threshold.warn}%</span>
+                    </div>
+                    <input type="range" min="0.5" max="10" step="0.5"
+                      value={threshold.warn}
+                      onChange={e => setThreshold(p => ({ ...p, warn: +e.target.value }))}
+                      style={{ width: "100%", accentColor: C.yellow, cursor: "pointer" }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", color: C.muted, fontSize: 11, marginTop: 4 }}>
+                      <span>0.5%</span><span>Conservative ← → Aggressive</span><span>10%</span>
+                    </div>
+                  </div>
+
+                  {/* Critical Slider */}
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                      <span style={{ color: C.red, fontSize: 13, fontWeight: 700 }}>🚨 Critical Threshold</span>
+                      <span style={{ color: C.red, fontSize: 18, fontWeight: 900, fontFamily: "monospace" }}>{threshold.critical}%</span>
+                    </div>
+                    <input type="range" min="1" max="20" step="0.5"
+                      value={threshold.critical}
+                      onChange={e => setThreshold(p => ({ ...p, critical: +e.target.value }))}
+                      style={{ width: "100%", accentColor: C.red, cursor: "pointer" }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between", color: C.muted, fontSize: 11, marginTop: 4 }}>
+                      <span>1%</span><span>Conservative ← → Aggressive</span><span>20%</span>
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    <div style={{ flex: 1, background: `${C.yellow}15`, border: `1px solid ${C.yellow}40`, borderRadius: 8, padding: "10px", textAlign: "center" }}>
+                      <div style={{ color: C.yellow, fontSize: 11, fontWeight: 700 }}>WARNING FIRES AT</div>
+                      <div style={{ color: C.yellow, fontSize: 22, fontWeight: 900 }}>&gt;{threshold.warn}%</div>
+                    </div>
+                    <div style={{ flex: 1, background: `${C.red}15`, border: `1px solid ${C.red}40`, borderRadius: 8, padding: "10px", textAlign: "center" }}>
+                      <div style={{ color: C.red, fontSize: 11, fontWeight: 700 }}>CRITICAL FIRES AT</div>
+                      <div style={{ color: C.red, fontSize: 22, fontWeight: 900 }}>&gt;{threshold.critical}%</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── SECTION 2: PRICE LEVELS ── */}
+                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 16, color: C.text }}>💰 Price Alert Levels ($/lb)</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+                    {priceLevels.sort((a,b) => a-b).map(level => (
+                      <div key={level} style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        background: C.bg, border: `1px solid ${C.accent}60`,
+                        borderRadius: 6, padding: "6px 12px",
+                      }}>
+                        <span style={{ color: C.accent, fontWeight: 700, fontFamily: "monospace" }}>${level.toFixed(2)}</span>
+                        <button onClick={() => setPriceLevels(p => p.filter(l => l !== level))}
+                          style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="number" step="0.25" min="1" max="20"
+                      placeholder="Add level e.g. 6.25"
+                      value={newLevel}
+                      onChange={e => setNewLevel(e.target.value)}
+                      style={{
+                        flex: 1, padding: "8px 12px", borderRadius: 6, fontSize: 13,
+                        background: C.bg, border: `1px solid ${C.border}`, color: C.text, outline: "none",
+                      }}
+                    />
+                    <button onClick={() => {
+                      const v = parseFloat(newLevel);
+                      if (v && !priceLevels.includes(v)) { setPriceLevels(p => [...p, v]); setNewLevel(""); }
+                    }} style={{
+                      padding: "8px 16px", borderRadius: 6, cursor: "pointer",
+                      background: C.accent, color: "#fff", border: "none", fontWeight: 700,
+                    }}>+ Add</button>
+                  </div>
+                  <div style={{ color: C.muted, fontSize: 11, marginTop: 8 }}>Click × to remove a level. Alerts fire when price crosses any level.</div>
+                </div>
+
+                {/* ── SECTION 3: SMS NUMBER ── */}
+                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 16, color: C.text }}>📱 SMS Alert Number (TPG/Optus)</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ position: "relative", flex: 1 }}>
+                      <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: C.muted, fontSize: 13 }}>04</span>
+                      <input
+                        type="text" maxLength={8} placeholder="12 345 678"
+                        value={smsNumber}
+                        onChange={e => setSmsNumber(e.target.value.replace(/\D/g, ""))}
+                        style={{
+                          width: "100%", padding: "10px 12px 10px 36px", borderRadius: 6, fontSize: 14,
+                          background: C.bg, border: `1px solid ${C.border}`, color: C.text,
+                          outline: "none", boxSizing: "border-box", fontFamily: "monospace",
+                        }}
+                      />
+                    </div>
+                  </div>
+                  {smsNumber.length === 8 && (
+                    <div style={{ marginTop: 10, background: `${C.green}15`, border: `1px solid ${C.green}40`, borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
+                      <span style={{ color: C.muted }}>SMS will send to: </span>
+                      <span style={{ color: C.green, fontFamily: "monospace", fontWeight: 700 }}>04{smsNumber}@optusmessaging.com</span>
+                    </div>
+                  )}
+                  <div style={{ color: C.muted, fontSize: 11, marginTop: 8 }}>Enter your 8 digits after the 04. Works on TPG, Optus, and Optus MVNO networks.</div>
+                </div>
+
+                {/* ── SECTION 4: CHANGE PIN ── */}
+                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 10, padding: "20px", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 16, color: C.text }}>🔑 Change Admin PIN</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input id="newpin" type="password" maxLength={6} placeholder="New PIN (max 6 digits)"
+                      style={{
+                        flex: 1, padding: "10px 12px", borderRadius: 6, fontSize: 14,
+                        background: C.bg, border: `1px solid ${C.border}`, color: C.text, outline: "none",
+                      }}
+                    />
+                    <button onClick={() => {
+                      const np = document.getElementById("newpin").value;
+                      if (np.length >= 4) {
+                        const cfg = loadConfig();
+                        cfg.pin = np;
+                        localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+                        document.getElementById("newpin").value = "";
+                        setAdminSaved(true);
+                        setTimeout(() => setAdminSaved(false), 2000);
+                      }
+                    }} style={{
+                      padding: "10px 16px", borderRadius: 6, cursor: "pointer",
+                      background: C.panel, color: C.text, border: `1px solid ${C.border}`, fontWeight: 700,
+                    }}>Update PIN</button>
+                  </div>
+                  <div style={{ color: C.muted, fontSize: 11, marginTop: 8 }}>Minimum 4 digits. Change this from the default immediately.</div>
+                </div>
+
+                {/* SAVE BUTTON */}
+                <button onClick={() => {
+                  const config = { warn: threshold.warn, critical: threshold.critical, priceLevels, smsNumber, pin: ADMIN_PIN };
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                  setAdminSaved(true);
+                  setTimeout(() => setAdminSaved(false), 3000);
+                }} style={{
+                  width: "100%", padding: "14px", borderRadius: 10, cursor: "pointer",
+                  background: adminSaved ? C.greenDim : C.accent,
+                  color: adminSaved ? C.green : "#fff",
+                  border: `1px solid ${adminSaved ? C.green : C.accent}`,
+                  fontWeight: 800, fontSize: 15, transition: "all 0.3s",
+                  boxShadow: adminSaved ? `0 0 20px ${C.green}44` : `0 0 20px ${C.accent}44`,
+                }}>
+                  {adminSaved ? "✅ Settings Saved!" : "💾 Save All Settings"}
+                </button>
+
+                {/* CONFIG EXPORT */}
+                <div style={{ marginTop: 14, background: `${C.teal}10`, border: `1px solid ${C.teal}30`, borderRadius: 8, padding: "12px 16px" }}>
+                  <div style={{ color: C.teal, fontWeight: 700, fontSize: 12, marginBottom: 6 }}>📋 Python Config (copy to copper_alert.py)</div>
+                  <pre style={{ margin: 0, fontSize: 12, color: C.text, fontFamily: "monospace" }}>
+{`THRESHOLD_WARN = ${threshold.warn}
+THRESHOLD_CRIT = ${threshold.critical}
+PRICE_LEVELS   = ${JSON.stringify(priceLevels.sort((a,b)=>a-b))}
+SMS_TO         = "04${smsNumber}@optusmessaging.com"`}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+
         <div style={{ marginTop: 28, paddingTop: 16, borderTop: `1px solid ${C.border}`, display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted }}>
           <span>📡 Live data sources: Yahoo Finance (HG=F) • CFTC COT Report (Fridays)</span>
           <span style={{ color: C.redDim }}>⚠️ Not financial advice</span>
